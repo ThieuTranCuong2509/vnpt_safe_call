@@ -1,0 +1,77 @@
+package vnpt.trust_call.handler.special
+
+import android.Manifest
+import androidx.activity.ComponentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import vnpt.trust_call.handler.PermissionRequester
+import vnpt.trust_call.handler.core.special.SpecialPermissionResultObserver
+import vnpt.trust_call.handler.core.special.SpecialPermissionType
+
+class SpecialPermissionRequester(
+    private val activity: ComponentActivity,
+    requestedPermission: String,
+) : PermissionRequester(activity) {
+    var requestedPermission: String = requestedPermission
+        set(value) {
+            checkPermissionPreviously(value)
+            field = value
+        }
+
+    private val specialPermissionResultObserver = SpecialPermissionResultObserver(
+        activity = activity,
+    )
+
+    private var onSpecialPermissionRequestResult: ((Pair<String, SpecialPermissionState>) -> Unit)? = null
+
+    private val specialPermissionType = when (requestedPermission) {
+        Manifest.permission.MANAGE_EXTERNAL_STORAGE -> SpecialPermissionType.ManageExternalStorage(activity)
+        Manifest.permission.MANAGE_MEDIA -> SpecialPermissionType.ManageMedia(activity)
+        Manifest.permission.REQUEST_INSTALL_PACKAGES -> SpecialPermissionType.RequestInstallPackages(activity)
+        Manifest.permission.SCHEDULE_EXACT_ALARM -> SpecialPermissionType.ScheduleExactAlarm(activity)
+        Manifest.permission.SYSTEM_ALERT_WINDOW -> SpecialPermissionType.SystemAlertWindow(activity)
+        Manifest.permission.WRITE_SETTINGS -> SpecialPermissionType.WriteSettings(activity)
+        else -> SpecialPermissionType.Unknown(requestedPermission)
+    }
+
+    private var isFirstOnStartCallback = true
+
+    private val activityLifecycleObserver: LifecycleEventObserver by lazy {
+        LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START) {
+                isFirstOnStartCallback = if (isFirstOnStartCallback) {
+                    false
+                } else {
+                    activity.lifecycle.removeObserver(activityLifecycleObserver)
+                    val permissionRequestResult = specialPermissionResultObserver.invoke(
+                        type = specialPermissionType,
+                        isGranted = isPermissionGranted(),
+                    )
+                    onSpecialPermissionRequestResult?.invoke(permissionRequestResult)
+                    true
+                }
+            }
+        }
+    }
+
+    init {
+        checkPermissionPreviously(requestedPermission)
+    }
+
+    fun isPermissionGranted() = specialPermissionType.isGranted()
+
+    fun requestPermission(
+        onSpecialPermissionRequestResult: ((Pair<String, SpecialPermissionState>) -> Unit)? = null,
+    ) {
+        this.onSpecialPermissionRequestResult = onSpecialPermissionRequestResult
+        try {
+            specialPermissionType.requestPermission()
+            activity.lifecycle.addObserver(activityLifecycleObserver)
+        } catch (exception: Exception) {
+            specialPermissionResultObserver.invoke(
+                type = specialPermissionType,
+                isGranted = false,
+            )
+        }
+    }
+}
